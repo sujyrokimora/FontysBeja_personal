@@ -1,0 +1,31 @@
+---
+title: "CustomerSales"
+author: "<your name goes here>"
+date: "2023-04-19"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(duckdb)
+```
+
+Read the dataset; select only the variables relevant for this analysis
+
+```{r}
+sales <- read_csv('CustomerSales.csv', col_select = c(ordno, city, orddate, linetotal), col_types = "ccDd")
+head(sales)
+```
+
+```{r}
+con <- DBI::dbConnect(drv = duckdb())
+duckdb::duckdb_register(con, "sales", sales)
+```
+
+#### What is the total sales in Eindhoven?
+
+#### What is the total sales for each city, for each month, for each year?
+
+#### What is for each year, for each weekday the number of weeks in which it was the day with the highest sales?
+
+
