@@ -2,12 +2,16 @@
 title: "CustomerSales"
 author: "ML"
 date: "2023-04-14"
-output: html_document
+output: github_document
 ---
 
 In this notebook we conduct a simple analysis on a simple dataset of a food retailer. The dataset consist of only a single table and is stores in a csv file.
 
 We will use the tidyverse to do the analysis. The tidyverse is a set of packages created for exploratory data analysis.[R for Data Science](https://r4ds.hadley.nz/) is an excellent beginners book to study the tidyverse. In addition, all tidyverse packages have their own documentation web sites. They all have the structure <package name>.tidyverse.org, such as [dplyr.tidyverse.org](dplyr.tidyverse.org).
+
+We use [DuckDB](https://duckdb.org/) as an in-process relational database. Although we don't use it in this notebook, DuckDB enables to load data directly from csv and Parquet files and compresses its tables heavily. It is also much faster than dplyr, although you won't notice with the small dataset that we use.
+
+If the packages won't load, you have to install them using `install.packages()`. Usuall Rstudio will ask you to install the packages for you.
 
 ```{r}
 library(tidyverse)
@@ -21,7 +25,7 @@ sales <- read_csv('CustomerSales.csv', col_select = c(ordno, city, orddate, line
 head(sales)
 ```
 
-We want to mirror our dplyr with SQL. To do so, we need the dataframes we operate on with dplyr as tables in our SQL database. DuckDB is a great match for such a database: it is in-memory, optimized for SQL analysis queries and it enables using R dataframes  as virtual tables in its in-memory database. DuckDB's SQL adheres to PostgreSQL's SQL dialect.
+We want to mirror our dplyr with SQL. To do so, we need the dataframes we operate on with dplyr as tables in our SQL database. DuckDB is a great match for such a database: it is in-memory, optimized for SQL analysis queries and it enables using R dataframes as virtual tables in its in-memory database. DuckDB's SQL adheres to PostgreSQL's SQL dialect.
 
 ```{r}
 con <- DBI::dbConnect(drv = duckdb())
@@ -42,15 +46,15 @@ where city = 'Eindhoven'
 
 This is how you solve it in dplyr. Though translation from dplyr to SQL is much more interesting due to the higher expressiveness of dplyr, we can define some simple rules for translating SQL to dplyr. Although incomplete the set of rules below suffices for the simple queries we start with.
 
-- FROM: translates to just the dataframe (operation) at the top of the dplyr query;
-- WHERE: translates to a `filter()` operation;
-- GROUP BY: translates to either a `group_by()` operation, or a `.by` parameter in one of the dplyr operation supporting it;
-- HAVING: translates to a `filter()` operation
-- SELECT: translates to
-  - a `select()` operation if we just use the name of a column;
-  - a `mutate()` operation if we use an expression to create a new column;
-  - a `summarise()` operation if we use an aggregation
-  
+-   FROM: translates to just the dataframe (operation) at the top of the dplyr query;
+-   WHERE: translates to a `filter()` operation;
+-   GROUP BY: translates to either a `group_by()` operation, or a `.by` parameter in one of the dplyr operation supporting it;
+-   HAVING: translates to a `filter()` operation
+-   SELECT: translates to
+    -   a `select()` operation if we just use the name of a column;
+    -   a `mutate()` operation if we use an expression to create a new column;
+    -   a `summarise()` operation if we use an aggregation
+
 [Here](https://medium.com/mlearning-ai/dplyr-vs-sql-c7277abc9482) you can find a more comprehensive set of translation rules.
 
 ```{r}
@@ -273,7 +277,6 @@ from sales
 group by year, month, city
 ```
 
-
 #### How many lines have our orders?
 
 ```{r}
@@ -292,7 +295,7 @@ sales |>
   count(nrLines, name = "nrOrders")
 ```
 
-Since we are changing the group level along the query, we have to do this in multiple steps in SQL. Although we could use a (nested) subquery for this, we favor a common table expression  as this is easier to read (to-to-bottom instead of inside-out). Moreover, top-to-bottom evaluation is the same approach we take in a piped query in dplyr.
+Since we are changing the group level along the query, we have to do this in multiple steps in SQL. Although we could use a (nested) subquery for this, we favor a common table expression as this is easier to read (to-to-bottom instead of inside-out). Moreover, top-to-bottom evaluation is the same approach we take in a piped query in dplyr.
 
 ```{sql connection=con}
 with cte as (
@@ -344,4 +347,3 @@ One of the shortcomings of SQL is that window functions can only be used in sele
 ```{r}
 DBI::dbDisconnect(conn = con, shutdown = TRUE)
 ```
-

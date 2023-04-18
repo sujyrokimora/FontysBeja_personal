@@ -26,6 +26,8 @@ duckdb::duckdb_register(con, "sales", sales)
 
 #### What is the total sales for each city, for each month, for each year?
 
+### What is the proportional sales contribution (0<= prop <=1) for each city in each year/month combination?
+
 #### What is for each year, for each weekday the number of weeks in which it was the day with the highest sales?
 
 
