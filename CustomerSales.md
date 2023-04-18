@@ -16,9 +16,10 @@ documentation web sites. They all have the structure
 [dplyr.tidyverse.org](dplyr.tidyverse.org).
 
 We use [DuckDB](https://duckdb.org/) as an in-process relational
-database. DuckDB enables to load data directly from csv and Parquet
-files and compresses its tables heavly. It is also much faster than
-dplyr, although you won’t notice with the samll dataset that we use.
+database. Although we don’t use it in this notebook, DuckDB enables to
+load data directly from csv and Parquet files and compresses its tables
+heavily. It is also much faster than dplyr, although you won’t notice
+with the small dataset that we use.
 
 If the packages won’t load, you have to install them using
 `install.packages()`. Usuall Rstudio will ask you to install the
