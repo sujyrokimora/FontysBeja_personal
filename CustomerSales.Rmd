@@ -1,0 +1,347 @@
+---
+title: "CustomerSales"
+author: "ML"
+date: "2023-04-14"
+output: html_document
+---
+
+In this notebook we conduct a simple analysis on a simple dataset of a food retailer. The dataset consist of only a single table and is stores in a csv file.
+
+We will use the tidyverse to do the analysis. The tidyverse is a set of packages created for exploratory data analysis.[R for Data Science](https://r4ds.hadley.nz/) is an excellent beginners book to study the tidyverse. In addition, all tidyverse packages have their own documentation web sites. They all have the structure <package name>.tidyverse.org, such as [dplyr.tidyverse.org](dplyr.tidyverse.org).
+
+```{r}
+library(tidyverse)
+library(duckdb)
+```
+
+Read the dataset; select only the variables relevant for this analysis
+
+```{r}
+sales <- read_csv('CustomerSales.csv', col_select = c(ordno, city, orddate, linetotal), col_types = "ccDd")
+head(sales)
+```
+
+We want to mirror our dplyr with SQL. To do so, we need the dataframes we operate on with dplyr as tables in our SQL database. DuckDB is a great match for such a database: it is in-memory, optimized for SQL analysis queries and it enables using R dataframes  as virtual tables in its in-memory database. DuckDB's SQL adheres to PostgreSQL's SQL dialect.
+
+```{r}
+con <- DBI::dbConnect(drv = duckdb())
+duckdb::duckdb_register(con, "sales", sales)
+```
+
+`duckdb::duckdb_register()` enables the use of the sales dataframe as a virtual table. A virtual table here acts like an SQL view: you can approach the virtual table as a common SQL table. DuckDB handles all overhead.
+
+#### What is the total sales in Eindhoven?
+
+First we solve this in SQL:
+
+```{sql connection=con}
+select sum(linetotal) as EindhovenSales
+from sales
+where city = 'Eindhoven'
+```
+
+This is how you solve it in dplyr. Though translation from dplyr to SQL is much more interesting due to the higher expressiveness of dplyr, we can define some simple rules for translating SQL to dplyr. Although incomplete the set of rules below suffices for the simple queries we start with.
+
+- FROM: translates to just the dataframe (operation) at the top of the dplyr query;
+- WHERE: translates to a `filter()` operation;
+- GROUP BY: translates to either a `group_by()` operation, or a `.by` parameter in one of the dplyr operation supporting it;
+- HAVING: translates to a `filter()` operation
+- SELECT: translates to
+  - a `select()` operation if we just use the name of a column;
+  - a `mutate()` operation if we use an expression to create a new column;
+  - a `summarise()` operation if we use an aggregation
+  
+[Here](https://medium.com/mlearning-ai/dplyr-vs-sql-c7277abc9482) you can find a more comprehensive set of translation rules.
+
+```{r}
+sales |> 
+  filter(city == "Eindhoven") |> 
+  summarise(EindhoveSales = sum(linetotal))
+```
+
+#### What is the total monthly sales in Eindhoven in 2022?
+
+```{sql connection=con}
+select monthname(orddate) as month, sum(linetotal) as EindhovenSales
+from sales
+where city = 'Eindhoven' and year(orddate) = 2020
+group by monthname(orddate)
+```
+
+Here is a straightforward translation of the SQL into dplyr.
+
+```{r}
+sales |> 
+  mutate(year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  filter(city == "Eindhoven", year == 2020) |> 
+  group_by(month) |> 
+  summarise(EindhoveSales = sum(linetotal))
+```
+
+In dplyr we can combine we can use mutating expressions as parameters in many operations:
+
+```{r}
+sales |> 
+  filter(city == "Eindhoven", year(orddate) == 2020) |> 
+  group_by(city, month = month(orddate, label = TRUE)) |> 
+  summarise(EindhoveSales = sum(linetotal))
+```
+
+Alternatively:
+
+```{r}
+sales |> 
+  group_by(city, year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  summarise(EindhoveSales = sum(linetotal)) |> 
+  filter(city == "Eindhoven", year == 2020)
+```
+
+But this would have been an translation of a different, but alternative SQL query. Note that the SQL query is more complex because the WHERE clause always precedes the GROUP BY clause. In dplyr this strict order is much more relaxed.
+
+```{sql connection=con}
+select city, year, total
+from (
+  select city, year(orddate) as year, monthname(orddate) as month, sum(linetotal) as total
+  from sales
+  group by city, year(orddate), monthname(orddate)
+)
+where city = 'Eindhoven' and year = 2020
+```
+
+We prefer common table expressions over inner queries because they are more readable: top-to-bottom instead of inside-out.
+
+```{sql connection=con}
+with cte as (
+  select city, year(orddate) as year, monthname(orddate) as month, sum(linetotal) as total
+  from sales
+  group by city, year(orddate), monthname(orddate)
+)
+select city, year, total
+from cte
+where city = 'Eindhoven' and year = 2020
+```
+
+#### What is the total sales for each city?
+
+```{r}
+sales |> 
+  group_by(city) |> 
+  summarise(total = sum(linetotal))
+```
+
+We can also capture the resulting dataframe in a regular R variable:
+
+```{r}
+res <- sales |> 
+  group_by(city) |> 
+  summarise(total = sum(linetotal))
+res
+```
+
+We can use this captured result to visualise the dataframe with ggplot. Note that ggplot uses `+` instead of `|>`.
+
+```{r}
+ggplot(data = res, mapping = aes(x = city, y = total)) +
+  geom_col()
+```
+
+But we can also just chain along and pipe the result of the dplyr query straight into ggplot.
+
+```{r}
+sales |> 
+  group_by(city) |> 
+  summarise(total = sum(linetotal)) |> 
+  ggplot(aes(city, total)) +
+  geom_col()
+```
+
+#### What is the total sales for each city, for each month, for each year?
+
+```{r}
+sales |> 
+  group_by(city, year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  summarise(total = sum(linetotal)) |> 
+  pivot_wider(names_from = year, values_from = total)
+```
+
+Note the warning: `group_by()` creates a persistent grouping context. By default `summarise()` peels off only the last element of the grouping context. We can override this using the `.groups` parameter. It is considered good style to be explicit and use the .`groups` parameter in `summarise()` Here we want to get rid of the complete grouping context and, hence, use `.groups = "drop`.
+
+```{r}
+sales |> 
+  group_by(city, year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  summarise(total = sum(linetotal), .groups = "drop") |> 
+  pivot_wider(names_from = year, values_from = total)
+```
+
+What if we want proportional instead of absolute sales figures?
+
+```{r}
+sales |> 
+  group_by(city, year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  summarise(total = sum(linetotal), .groups = "drop_last") |>
+  mutate(total = total/sum(total)) |> 
+  pivot_wider(names_from = year, values_from = total)
+```
+
+But to what whole does the proportion belong? Let's do a quick test:
+
+```{r}
+sales |> 
+  group_by(city, year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  summarise(total = sum(linetotal), .groups = "drop_last") |>
+  mutate(total = total/sum(total)) |> 
+  pivot_wider(names_from = year, values_from = total) |> 
+  group_by(city) |> 
+  summarise(totprop = sum(`2020`, na.rm = TRUE))
+```
+
+Here the proportions are proportions of the yearly sales per city. What the whole is, is determined by the grouping context in the mutate expression. Remember that by default, the last element of the grouping context is peeled off by the `summarise()`, so a grouping context of city and year is left.
+
+So, if you use persistent grouping, using `group_by()`, the order of variables in the grouping context is critical.
+
+```{r}
+sales |> 
+  group_by(year = year(orddate), month = month(orddate, label = TRUE), city) |> 
+  summarise(total = sum(linetotal), .groups = "drop_last") |>
+  mutate(total = total/sum(total)) |> 
+  pivot_wider(names_from = year, values_from = total)
+```
+
+If the persistent grouping list is confusing, you can switch to per-operation grouping:
+
+```{r}
+sales |> 
+  mutate(year = year(orddate), month = month(orddate, label = TRUE)) |> 
+  summarise(total = sum(linetotal), .by = c(year, month, city)) |>
+  mutate(total = total/sum(total), .by = c(year, month)) |> 
+  pivot_wider(names_from = year, values_from = total)
+```
+
+How do we translate this to SQL? In the old days we used either a correlated subquery to calculate this:
+
+```{sql connection=con}
+select year(orddate) as year, monthname(orddate) as month, city,
+  sum(linetotal)/(
+    select sum(linetotal)
+    from sales s2
+    where year(s2.orddate) = year(s1.orddate) and monthname(s2.orddate) = monthname(s1.orddate)
+  ) as total
+from sales s1
+group by year, month, city
+```
+
+Or a join with inline views, like this.
+
+```{sql connection=con}
+with cityTotal as (
+  select year(orddate) as year, monthname(orddate) as month, city, sum(linetotal) as ctotal
+  from sales
+  group by year, month, city
+)
+, ymTotal as (
+  select year(orddate) as year, monthname(orddate) as month, sum(linetotal) as mtotal
+  from sales
+  group by year, month
+)
+select c.year, c.month, city, ctotal/mtotal as prop
+from cityTotal c
+join ymTotal m
+  on c.year = m.year
+  and c.month = m.month
+```
+
+Since the invention of windows function, about 15 years ago, solving this problem has become a lot simpler.
+
+```{sql connection=con}
+with cte as (
+  select year(orddate) as year, monthname(orddate) as month, city, sum(linetotal) as total
+  from sales
+  group by year, month, city
+)
+select year, month, city, total/sum(total) over (partition by year, month) as total
+from cte
+```
+
+Although the use of window functions in SQL can be a bit intimidating at first, they are really very powerful, especially with analysis queries.
+
+We can do the windowing even in a single step. `sum(sum())` looks a bit weird (and forbidden) at first, but once you get used to it, your queries get a lot more compact.
+
+```{sql connection=con}
+select year(orddate) as year, monthname(orddate) as month, city,
+  sum(linetotal)/sum(sum(linetotal)) over (partition by year, month) as total
+from sales
+group by year, month, city
+```
+
+
+#### How many lines have our orders?
+
+```{r}
+sales |> 
+  group_by(ordno) |> 
+  summarise(nrLines = n()) |> 
+  group_by(nrLines) |> 
+  summarise(nrOrders = n())
+```
+
+A more idiomatic dplyr solution in this case would be:
+
+```{r}
+sales |> 
+  count(ordno, name = "nrLines") |> 
+  count(nrLines, name = "nrOrders")
+```
+
+Since we are changing the group level along the query, we have to do this in multiple steps in SQL. Although we could use a (nested) subquery for this, we favor a common table expression  as this is easier to read (to-to-bottom instead of inside-out). Moreover, top-to-bottom evaluation is the same approach we take in a piped query in dplyr.
+
+```{sql connection=con}
+with cte as (
+  select count(*) as nrLines
+  from sales
+  group by ordno
+)
+select nrLines, count(*) as nrOrders
+from cte
+group by nrLines
+```
+
+#### What is for each year, for each weekday the number of weeks in which it was the day with the highest sales?
+
+```{r}
+sales |> 
+  group_by(
+    yr = isoyear(orddate),
+    wk = isoweek(orddate),
+    wday = wday(orddate, label = TRUE, week_start = 1)
+  ) |> 
+  summarise(tot = sum(linetotal), .groups = "drop_last") |> 
+  filter(rank(desc(tot)) == 1) |> 
+  ungroup() |> 
+  count(yr, wday)
+```
+
+```{sql connection=con}
+with cte as (
+  select
+    isoyear(orddate) as yr,
+    week(orddate) as wk,
+    dayname(orddate) as wday,
+    isodow(orddate) as dynr,
+    sum(linetotal) as tot,
+    rank() over (partition by yr, wk order by tot desc) as rnk
+  from sales
+  group by yr, wk, wday, dynr
+)
+select yr, wday, count(*) as n
+from cte
+where rnk = 1
+group by yr, wday, dynr
+order by yr, dynr
+```
+
+One of the shortcomings of SQL is that window functions can only be used in select and, less common, order by clauses. That means that when we want to filter or group on a window function value, we always have to use a subquery to calculate the window function value.
+
+```{r}
+DBI::dbDisconnect(conn = con, shutdown = TRUE)
+```
+

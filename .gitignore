@@ -40,3 +40,6 @@ vignettes/*.pdf
 
 # Rendered HTML files
 *.html
+
+mod*.Rmd
+*2.Rmd
