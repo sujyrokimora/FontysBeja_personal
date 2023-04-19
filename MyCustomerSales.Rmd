@@ -22,6 +22,13 @@ con <- DBI::dbConnect(drv = duckdb())
 duckdb::duckdb_register(con, "sales", sales)
 ```
 
+```{sql connection=con}
+SELECT SUM(linetotal) AS total 
+FROM sales WHERE CITY='Eindhoven'; 
+
+```
+
+
 #### What is the total sales in Eindhoven?
 
 #### What is the total sales for each city, for each month, for each year?
